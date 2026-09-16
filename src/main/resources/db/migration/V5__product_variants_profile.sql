@@ -1,0 +1,19 @@
+ALTER TABLE products
+  ADD COLUMN rating DECIMAL(3,2) NOT NULL DEFAULT 4.8;
+
+ALTER TABLE product_images
+  ADD COLUMN color VARCHAR(80) NULL;
+
+CREATE TABLE saved_addresses (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  user_id BIGINT NOT NULL,
+  full_name VARCHAR(120) NOT NULL,
+  phone VARCHAR(40),
+  address VARCHAR(500) NOT NULL,
+  city VARCHAR(120),
+  state VARCHAR(120),
+  pincode VARCHAR(20),
+  landmark VARCHAR(180),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_saved_addresses_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
