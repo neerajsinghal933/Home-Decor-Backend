@@ -20,7 +20,7 @@ public record OrderResponse(
         order.getOrderNumber(),
         order.getCreatedAt(),
         new OrderCustomerResponse(order.getCustomerName(), order.getCustomerPhone(), order.getCustomerEmail(), order.getAddress(), order.getCity(), order.getState(), order.getPincode(), order.getLandmark()),
-        title(order.getPaymentStatus().name()),
+        paymentLabel(order.getPaymentStatus()),
         order.getPaymentMethod(),
         order.getDeliveryMethod(),
         order.getEstimatedDelivery(),
@@ -31,5 +31,17 @@ public record OrderResponse(
 
   private static String title(String value) {
     return value.substring(0, 1) + value.substring(1).toLowerCase();
+  }
+
+  private static String paymentLabel(PaymentStatus status) {
+    return switch (status) {
+      case PAID -> "Paid";
+      case PENDING -> "Pending";
+      case FAILED -> "Failed";
+      case REFUND_PENDING -> "Refund initiated";
+      case PARTIALLY_REFUNDED -> "Partially refunded";
+      case REFUND_FAILED -> "Refund needs attention";
+      case REFUNDED -> "Refund completed";
+    };
   }
 }

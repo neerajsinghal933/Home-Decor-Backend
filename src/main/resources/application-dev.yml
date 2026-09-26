@@ -1,0 +1,10 @@
+spring:
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+
+app:
+  storage:
+    local-path: ${APP_LOCAL_STORAGE_PATH:uploads}
+    public-base-url: ${APP_PUBLIC_BASE_URL:http://localhost:8080}

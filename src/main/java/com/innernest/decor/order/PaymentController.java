@@ -20,14 +20,20 @@ public class PaymentController {
 
   @PostMapping("/razorpay/orders")
   @ResponseStatus(HttpStatus.CREATED)
-  RazorpayCreateOrderResponse createRazorpayOrder(@RequestHeader(value = "X-Session-Id", required = false) String sessionId,
-                                                  @Valid @RequestBody CreateOrderRequest request) {
-    return razorpay.create(sessionId, request);
+  RazorpayCreateOrderResponse createRazorpayOrder(@Valid @RequestBody CreateOrderRequest request) {
+    return razorpay.create(request);
   }
 
   @PostMapping("/razorpay/verify")
-  OrderResponse verifyRazorpayPayment(@RequestHeader(value = "X-Session-Id", required = false) String sessionId,
-                                      @Valid @RequestBody RazorpayVerifyRequest request) {
-    return razorpay.verify(sessionId, request);
+  OrderResponse verifyRazorpayPayment(@Valid @RequestBody RazorpayVerifyRequest request) {
+    return razorpay.verify(request);
+  }
+
+  @PostMapping("/razorpay/webhook")
+  @ResponseStatus(HttpStatus.NO_CONTENT)
+  void razorpayWebhook(@RequestHeader("X-Razorpay-Event-Id") String eventId,
+                       @RequestHeader("X-Razorpay-Signature") String signature,
+                       @RequestBody byte[] rawBody) {
+    razorpay.processWebhook(eventId, signature, rawBody);
   }
 }

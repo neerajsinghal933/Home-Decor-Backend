@@ -4,9 +4,14 @@ import com.innernest.decor.catalog.ProductResponse;
 import com.innernest.decor.catalog.TagRequest;
 import com.innernest.decor.catalog.TagResponse;
 import com.innernest.decor.order.OrderResponse;
+import com.innernest.decor.order.AdminOrderRequestResponse;
+import com.innernest.decor.order.AdminRequestDecision;
+import com.innernest.decor.order.OrderLifecycleService;
 import com.innernest.decor.user.UserResponse;
+import com.innernest.decor.content.NewsletterSubscriptionResponse;
 import jakarta.validation.Valid;
 import java.util.List;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -16,14 +21,17 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.ResponseStatus;
 
 @RestController
 @RequestMapping("/api/admin")
 public class AdminController {
   private final AdminService service;
+  private final OrderLifecycleService lifecycle;
 
-  AdminController(AdminService service) {
+  AdminController(AdminService service, OrderLifecycleService lifecycle) {
     this.service = service;
+    this.lifecycle = lifecycle;
   }
 
   @GetMapping("/dashboard")
@@ -46,6 +54,11 @@ public class AdminController {
     return service.customers();
   }
 
+  @GetMapping("/subscribers")
+  List<NewsletterSubscriptionResponse> subscribers() {
+    return service.subscribers();
+  }
+
   @PostMapping("/products")
   ProductResponse createProduct(@Valid @RequestBody AdminProductRequest request) {
     return service.createProduct(request);
@@ -59,6 +72,12 @@ public class AdminController {
   @DeleteMapping("/products/{id}")
   ProductResponse deleteProduct(@PathVariable Long id) {
     return service.deactivateProduct(id);
+  }
+
+  @DeleteMapping("/products/{id}/permanent")
+  @ResponseStatus(HttpStatus.NO_CONTENT)
+  void permanentlyDeleteProduct(@PathVariable Long id) {
+    service.permanentlyDeleteProduct(id);
   }
 
   @PutMapping("/products/order")
@@ -79,5 +98,22 @@ public class AdminController {
   @PutMapping("/orders/{orderNumber}/status")
   OrderResponse updateOrderStatus(@PathVariable String orderNumber, @Valid @RequestBody AdminOrderStatusRequest request) {
     return service.updateOrderStatus(orderNumber, request);
+  }
+
+  @GetMapping("/order-requests")
+  List<AdminOrderRequestResponse> orderRequests(@RequestParam(required = false) String type,
+                                                @RequestParam(required = false) String status,
+                                                @RequestParam(required = false) String refundStatus) {
+    return lifecycle.adminRequests(type, status, refundStatus);
+  }
+
+  @PostMapping("/order-requests/{id}/approve")
+  AdminOrderRequestResponse approveOrderRequest(@PathVariable Long id, @Valid @RequestBody AdminRequestDecision request) {
+    return lifecycle.approve(id, request);
+  }
+
+  @PostMapping("/order-requests/{id}/reject")
+  AdminOrderRequestResponse rejectOrderRequest(@PathVariable Long id, @Valid @RequestBody AdminRequestDecision request) {
+    return lifecycle.reject(id, request);
   }
 }

@@ -43,41 +43,11 @@ public class OrderService {
     if (!paymentMethod.equalsIgnoreCase("Cash on Delivery")) {
       throw new BusinessRuleException("Online payments must be completed through Razorpay");
     }
-    Order saved = createOrder(sessionId, request, PaymentStatus.PENDING, true);
+    Order saved = createOrder(sessionId, request);
     return OrderResponse.from(saved);
   }
 
-  @Transactional
-  public Order createPendingPaymentOrder(String sessionId, CreateOrderRequest request) {
-    return createOrder(sessionId, request, PaymentStatus.PENDING, false);
-  }
-
-  @Transactional
-  public OrderResponse markPaid(String sessionId, String orderNumber, String razorpayOrderId, String razorpayPaymentId, String razorpaySignature) {
-    Order order = orders.findWithItemsByOrderNumber(orderNumber)
-        .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
-    if (order.getPaymentStatus() == PaymentStatus.PAID) return OrderResponse.from(order);
-    if (order.getPaymentStatus() != PaymentStatus.PENDING) throw new BusinessRuleException("Order is not awaiting payment");
-    if (order.getRazorpayOrderId() == null || !order.getRazorpayOrderId().equals(razorpayOrderId)) {
-      throw new BusinessRuleException("Payment order mismatch");
-    }
-    reserveInventory(order);
-    order.setPaymentStatus(PaymentStatus.PAID);
-    order.setRazorpayPaymentId(razorpayPaymentId);
-    order.setRazorpaySignature(razorpaySignature);
-    Cart cart = carts.loadOrCreate(sessionId);
-    cart.getItems().clear();
-    return OrderResponse.from(orders.save(order));
-  }
-
-  @Transactional
-  public void attachRazorpayOrderId(String orderNumber, String razorpayOrderId) {
-    Order order = orders.findWithItemsByOrderNumber(orderNumber)
-        .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
-    order.setRazorpayOrderId(razorpayOrderId);
-  }
-
-  private Order createOrder(String sessionId, CreateOrderRequest request, PaymentStatus paymentStatus, boolean reserveInventory) {
+  private Order createOrder(String sessionId, CreateOrderRequest request) {
     Cart cart = carts.loadForCheckout(sessionId);
     if (cart.getItems().isEmpty()) {
       throw new DuplicateResourceException("Cart is empty or has already been checked out");
@@ -101,20 +71,21 @@ public class OrderService {
     order.setPincode(request.pincode());
     order.setLandmark(request.landmark());
     order.setPaymentMethod(blankDefault(request.paymentMethod(), "UPI"));
-    order.setPaymentStatus(paymentStatus);
+    order.setPaymentStatus(PaymentStatus.PENDING);
+    order.setStatus(OrderStatus.PLACED);
     order.setDeliveryMethod(blankDefault(request.deliveryMethod(), "Standard Delivery"));
     order.setEstimatedDelivery(order.getDeliveryMethod().startsWith("Express") ? "1-2 working days" : "3-5 working days");
 
     BigDecimal subtotal = BigDecimal.ZERO;
     for (CartItem cartItem : cart.getItems()) {
-      Product product = reserveInventory
-          ? products.findForInventoryUpdate(cartItem.getProduct().getId()).orElseThrow(() -> new ResourceNotFoundException("Product not found"))
-          : cartItem.getProduct();
+      Product product = products.findForInventoryUpdate(cartItem.getProduct().getId())
+          .orElseThrow(() -> new ResourceNotFoundException("Product not found"));
       if (product.getStock() < cartItem.getQty()) {
         throw new BusinessRuleException("Insufficient stock for " + product.getName());
       }
-      if (reserveInventory) product.setStock(product.getStock() - cartItem.getQty());
-      BigDecimal lineTotal = product.getPrice().multiply(BigDecimal.valueOf(cartItem.getQty()));
+      product.setStock(product.getStock() - cartItem.getQty());
+      BigDecimal unitPrice = carts.priceFor(cartItem);
+      BigDecimal lineTotal = unitPrice.multiply(BigDecimal.valueOf(cartItem.getQty()));
       subtotal = subtotal.add(lineTotal);
 
       OrderItem item = new OrderItem();
@@ -125,7 +96,7 @@ public class OrderService {
       item.setProductImage(product.getPrimaryImage());
       item.setColor(cartItem.getColor());
       item.setSize(cartItem.getSize());
-      item.setUnitPrice(product.getPrice());
+      item.setUnitPrice(unitPrice);
       item.setQty(cartItem.getQty());
       item.setLineTotal(lineTotal);
       order.getItems().add(item);
@@ -140,7 +111,7 @@ public class OrderService {
     order.setPromoCode(request.promoCode() == null || request.promoCode().isBlank() ? null : request.promoCode().trim().toUpperCase());
     order.setTotal(subtotal.add(shipping).add(tax).subtract(discount));
     Order saved = orders.save(order);
-    if (reserveInventory) cart.getItems().clear();
+    cart.getItems().clear();
     return saved;
   }
 
@@ -177,15 +148,6 @@ public class OrderService {
 
   private String blankDefault(String value, String fallback) {
     return value == null || value.isBlank() ? fallback : value.trim();
-  }
-
-  private void reserveInventory(Order order) {
-    for (OrderItem item : order.getItems()) {
-      Product product = products.findForInventoryUpdate(item.getProduct().getId())
-          .orElseThrow(() -> new ResourceNotFoundException("Product not found"));
-      if (product.getStock() < item.getQty()) throw new BusinessRuleException("Insufficient stock for " + product.getName());
-      product.setStock(product.getStock() - item.getQty());
-    }
   }
 
   private BigDecimal deliveryFee(String deliveryMethod, String paymentMethod, BigDecimal subtotal) {

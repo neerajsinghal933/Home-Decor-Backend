@@ -1,0 +1,18 @@
+spring:
+  config:
+    activate:
+      on-profile: prod
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+app:
+  cors:
+    allowed-origins: ${APP_ALLOWED_ORIGINS}
+  storage:
+    public-base-url: ${APP_PUBLIC_BASE_URL}
+    s3:
+      bucket: ${APP_S3_BUCKET}
+      region: ${APP_AWS_REGION}

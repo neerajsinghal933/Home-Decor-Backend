@@ -24,7 +24,7 @@ public record CartItemResponse(
         product.getId(),
         product.getName(),
         product.getCategory().getName(),
-        product.getPrice(),
+        product.findSizeVariant(item.getSize()).map(variant -> variant.getPrice()).orElse(product.getPrice()),
         product.getCompareAtPrice(),
         product.getReviewCount(),
         product.getBadge(),

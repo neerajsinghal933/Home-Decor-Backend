@@ -27,6 +27,7 @@ public record ProductResponse(
     String image,
     String img,
     List<ProductImageResponse> images,
+    List<ProductSizeVariantResponse> sizeVariants,
     List<TagResponse> tags,
     Instant createdAt,
     Instant updatedAt) {
@@ -57,6 +58,7 @@ public record ProductResponse(
         product.getPrimaryImage(),
         product.getPrimaryImage(),
         images,
+        product.getSizeVariantsInDisplayOrder().stream().map(ProductSizeVariantResponse::from).toList(),
         product.getTags().stream().sorted(java.util.Comparator.comparing(Tag::getName)).map(tag -> TagResponse.from(tag, 0)).toList(),
         product.getCreatedAt(),
         product.getUpdatedAt());

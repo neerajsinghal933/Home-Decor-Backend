@@ -16,9 +16,11 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/orders")
 public class OrderController {
   private final OrderService service;
+  private final OrderLifecycleService lifecycle;
 
-  OrderController(OrderService service) {
+  OrderController(OrderService service, OrderLifecycleService lifecycle) {
     this.service = service;
+    this.lifecycle = lifecycle;
   }
 
   @PostMapping
@@ -37,5 +39,20 @@ public class OrderController {
   OrderResponse get(@PathVariable String orderNumber,
                     @RequestHeader(value = "X-Session-Id", required = false) String sessionId) {
     return service.get(orderNumber, sessionId);
+  }
+
+  @GetMapping("/my/{orderNumber}/lifecycle")
+  OrderLifecycleResponse lifecycle(@PathVariable String orderNumber) {
+    return lifecycle.customerDetails(orderNumber);
+  }
+
+  @PostMapping("/my/{orderNumber}/cancellation")
+  OrderLifecycleResponse cancel(@PathVariable String orderNumber, @Valid @RequestBody OrderActionRequest request) {
+    return lifecycle.requestCancellation(orderNumber, request);
+  }
+
+  @PostMapping("/my/{orderNumber}/return")
+  OrderLifecycleResponse requestReturn(@PathVariable String orderNumber, @Valid @RequestBody OrderActionRequest request) {
+    return lifecycle.requestReturn(orderNumber, request);
   }
 }

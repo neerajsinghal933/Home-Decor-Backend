@@ -6,6 +6,7 @@ import com.innernest.decor.catalog.ProductImageInput;
 import com.innernest.decor.catalog.ProductRepository;
 import com.innernest.decor.catalog.ProductResponse;
 import com.innernest.decor.catalog.ProductStatus;
+import com.innernest.decor.catalog.ProductSizeVariantInput;
 import com.innernest.decor.catalog.Tag;
 import com.innernest.decor.catalog.TagRepository;
 import com.innernest.decor.catalog.TagRequest;
@@ -16,8 +17,14 @@ import com.innernest.decor.order.Order;
 import com.innernest.decor.order.OrderRepository;
 import com.innernest.decor.order.OrderResponse;
 import com.innernest.decor.order.OrderStatus;
+import com.innernest.decor.order.OrderStatusHistory;
+import com.innernest.decor.order.OrderStatusHistoryRepository;
+import com.innernest.decor.order.OrderActorType;
 import com.innernest.decor.user.UserRepository;
 import com.innernest.decor.user.UserResponse;
+import com.innernest.decor.content.NewsletterRepository;
+import com.innernest.decor.content.NewsletterSubscriptionResponse;
+import com.innernest.decor.storage.StorageCleanup;
 import java.util.EnumMap;
 import java.math.BigDecimal;
 import java.util.List;
@@ -27,6 +34,7 @@ import java.util.Locale;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,13 +45,23 @@ public class AdminService {
   private final OrderRepository orders;
   private final UserRepository users;
   private final TagRepository tags;
+  private final StorageCleanup storageCleanup;
+  private final JdbcTemplate jdbc;
+  private final NewsletterRepository newsletters;
+  private final OrderStatusHistoryRepository orderHistory;
 
-  AdminService(ProductRepository products, CategoryRepository categories, OrderRepository orders, UserRepository users, TagRepository tags) {
+  AdminService(ProductRepository products, CategoryRepository categories, OrderRepository orders, UserRepository users,
+               TagRepository tags, StorageCleanup storageCleanup, JdbcTemplate jdbc, NewsletterRepository newsletters,
+               OrderStatusHistoryRepository orderHistory) {
     this.products = products;
     this.categories = categories;
     this.orders = orders;
     this.users = users;
     this.tags = tags;
+    this.storageCleanup = storageCleanup;
+    this.jdbc = jdbc;
+    this.newsletters = newsletters;
+    this.orderHistory = orderHistory;
   }
 
   @Transactional(readOnly = true)
@@ -109,6 +127,11 @@ public class AdminService {
         .toList();
   }
 
+  @Transactional(readOnly = true)
+  public List<NewsletterSubscriptionResponse> subscribers() {
+    return newsletters.findAllByOrderByCreatedAtDesc().stream().map(NewsletterSubscriptionResponse::from).toList();
+  }
+
   @Transactional
   public ProductResponse createProduct(AdminProductRequest request) {
     Product product = new Product();
@@ -119,8 +142,14 @@ public class AdminService {
   @Transactional
   public ProductResponse updateProduct(Long id, AdminProductRequest request) {
     Product product = products.findById(id).orElseThrow(() -> new ResourceNotFoundException("Product not found"));
+    Set<String> oldImageUrls = productImageUrls(product);
     applyProduct(product, request);
-    return ProductResponse.from(products.save(product));
+    Product saved = products.save(product);
+    Set<String> retainedImageUrls = productImageUrls(saved);
+    oldImageUrls.stream()
+        .filter(url -> !retainedImageUrls.contains(url))
+        .forEach(url -> storageCleanup.deleteAfterCommit(url, "product-images/"));
+    return ProductResponse.from(saved);
   }
 
   @Transactional
@@ -128,6 +157,28 @@ public class AdminService {
     Product product = products.findById(id).orElseThrow(() -> new ResourceNotFoundException("Product not found"));
     product.setStatus(ProductStatus.INACTIVE);
     return ProductResponse.from(products.save(product));
+  }
+
+  @Transactional
+  public void permanentlyDeleteProduct(Long id) {
+    Product product = products.findWithImagesById(id)
+        .orElseThrow(() -> new ResourceNotFoundException("Product not found"));
+    Set<String> imageUrls = productImageUrls(product);
+    Set<String> orderHistoryImages = new java.util.HashSet<>(jdbc.queryForList(
+        "select distinct product_image from order_items where product_id = ? and product_image is not null",
+        String.class,
+        id));
+
+    // Carts are transient, while order item snapshots must remain available for order history.
+    jdbc.update("delete from cart_items where product_id = ?", id);
+    jdbc.update("update order_items set product_id = null where product_id = ?", id);
+    jdbc.update("update razorpay_payment_attempt_items set product_id = null where product_id = ?", id);
+    products.delete(product);
+    products.flush();
+
+    imageUrls.stream()
+        .filter(url -> !orderHistoryImages.contains(url))
+        .forEach(url -> storageCleanup.deleteAfterCommit(url, "product-images/"));
   }
 
   @Transactional
@@ -165,7 +216,22 @@ public class AdminService {
     if (!allowed(order.getStatus(), request.status())) {
       throw new BusinessRuleException("Order cannot move from " + order.getStatus() + " to " + request.status());
     }
+    if (request.status() == OrderStatus.CANCELLED && order.getPaymentStatus() == com.innernest.decor.order.PaymentStatus.PAID) {
+      throw new BusinessRuleException("Paid orders must be cancelled through the cancellation request workflow");
+    }
+    OrderStatus previous = order.getStatus();
     order.setStatus(request.status());
+    if (previous == OrderStatus.RETURN_APPROVED && request.status() == OrderStatus.RETURNED) {
+      order.getItems().forEach(item -> {
+        if (item.getProduct() == null) return;
+        products.findForInventoryUpdate(item.getProduct().getId())
+            .ifPresent(product -> product.setStock(product.getStock() + item.getQty()));
+      });
+    }
+    if (previous != request.status()) {
+      orderHistory.save(new OrderStatusHistory(order, previous, request.status(), OrderActorType.ADMIN,
+          "FULFILLMENT", null, "Fulfillment status updated"));
+    }
     return OrderResponse.from(orders.save(order));
   }
 
@@ -177,15 +243,25 @@ public class AdminService {
     product.setCategory(categories.findBySlug(request.categoryId())
         .or(() -> parseId(request.categoryId()).flatMap(categories::findById))
         .orElseThrow(() -> new ResourceNotFoundException("Category not found")));
-    product.setPrice(request.price());
+    List<AdminProductSizeVariantRequest> requestedVariants = request.sizeVariants() == null
+        ? List.of() : request.sizeVariants();
+    Set<String> normalizedSizes = new java.util.HashSet<>();
+    for (AdminProductSizeVariantRequest variant : requestedVariants) {
+      String normalized = variant.size().trim().toLowerCase(Locale.ROOT);
+      if (!normalizedSizes.add(normalized)) throw new BusinessRuleException("Each size must be unique");
+    }
+    product.replaceSizeVariants(requestedVariants.stream()
+        .map(variant -> new ProductSizeVariantInput(variant.size(), variant.price()))
+        .toList());
+    product.setPrice(requestedVariants.isEmpty() ? request.price() : requestedVariants.get(0).price());
     product.setCompareAtPrice(request.old());
     product.setBadge(blankToNull(request.badge()));
-    product.setRating(request.rating());
+    if (product.getId() == null) product.setRating(java.math.BigDecimal.ZERO);
     product.setColor(blankToNull(request.color()));
     product.setMaterial(blankToNull(request.material()));
     product.setDimensions(blankToNull(request.dimensions()));
     product.setStock(request.stock());
-    product.setReviewCount(request.reviews());
+    if (product.getId() == null) product.setReviewCount(0);
     product.setFeatured(request.featured());
     product.setDisplayOrder(request.displayOrder());
     product.setStatus(request.active() == null || request.active() ? ProductStatus.ACTIVE : ProductStatus.INACTIVE);
@@ -223,6 +299,7 @@ public class AdminService {
       case PLACED -> to == OrderStatus.PROCESSING;
       case PROCESSING -> to == OrderStatus.SHIPPED;
       case SHIPPED -> to == OrderStatus.DELIVERED;
+      case RETURN_APPROVED -> to == OrderStatus.RETURNED;
       default -> false;
     };
   }
@@ -237,6 +314,13 @@ public class AdminService {
 
   private String blankToNull(String value) {
     return value == null || value.isBlank() ? null : value.trim();
+  }
+
+  private Set<String> productImageUrls(Product product) {
+    Set<String> urls = new java.util.LinkedHashSet<>();
+    if (product.getPrimaryImage() != null) urls.add(product.getPrimaryImage());
+    product.getImages().stream().map(image -> image.getUrl()).forEach(urls::add);
+    return urls;
   }
 
   private void applyTag(Tag tag, TagRequest request) {

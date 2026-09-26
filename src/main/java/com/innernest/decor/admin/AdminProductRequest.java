@@ -1,5 +1,6 @@
 package com.innernest.decor.admin;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -29,5 +30,6 @@ public record AdminProductRequest(
     @Size(max = 255) String image,
     List<@Size(max = 500) String> images,
     List<AdminProductImageRequest> colorImages,
+    @Size(max = 30) List<@NotNull @Valid AdminProductSizeVariantRequest> sizeVariants,
     List<Long> tagIds) {
 }

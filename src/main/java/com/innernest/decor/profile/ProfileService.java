@@ -5,11 +5,12 @@ import com.innernest.decor.common.BusinessRuleException;
 import com.innernest.decor.common.ResourceNotFoundException;
 import com.innernest.decor.security.SecuritySupport;
 import com.innernest.decor.storage.StorageService;
+import com.innernest.decor.storage.StorageCleanup;
+import com.innernest.decor.storage.ImageUploadValidator;
 import com.innernest.decor.storage.StoredObject;
 import com.innernest.decor.user.User;
 import com.innernest.decor.user.UserRepository;
 import java.io.IOException;
-import java.util.Locale;
 import java.util.UUID;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -21,11 +22,13 @@ public class ProfileService {
   private final UserRepository users;
   private final SavedAddressRepository addresses;
   private final StorageService storage;
+  private final StorageCleanup storageCleanup;
 
-  ProfileService(UserRepository users, SavedAddressRepository addresses, StorageService storage) {
+  ProfileService(UserRepository users, SavedAddressRepository addresses, StorageService storage, StorageCleanup storageCleanup) {
     this.users = users;
     this.addresses = addresses;
     this.storage = storage;
+    this.storageCleanup = storageCleanup;
   }
 
   @Transactional(readOnly = true)
@@ -37,27 +40,27 @@ public class ProfileService {
   @Transactional
   public ProfileResponse update(ProfileUpdateRequest request) {
     User user = currentUser();
+    String oldProfileImageUrl = user.getProfileImageUrl();
     user.setName(request.name().trim());
     user.setPhone(blankToNull(request.phone()));
     user.setProfileImageUrl(blankToNull(request.profileImageUrl()));
-    return response(users.save(user));
+    User saved = users.save(user);
+    if (!java.util.Objects.equals(oldProfileImageUrl, saved.getProfileImageUrl())) {
+      storageCleanup.deleteAfterCommit(oldProfileImageUrl, "profile-images/");
+    }
+    return response(saved);
   }
 
   @Transactional
   public ProfileResponse updateImage(MultipartFile file) throws IOException {
-    if (file.isEmpty()) throw new BusinessRuleException("Profile image is required");
-    String contentType = file.getContentType();
-    if (contentType == null || !contentType.startsWith("image/")) {
-      throw new BusinessRuleException("Uploaded file must be an image");
-    }
-    String extension = switch (contentType.toLowerCase(Locale.ROOT)) {
-      case "image/jpeg" -> ".jpg";
-      case "image/png" -> ".png";
-      case "image/webp" -> ".webp";
-      default -> ".img";
-    };
-    StoredObject stored = storage.store("profile-images/" + UUID.randomUUID() + extension, contentType, file.getInputStream());
+    ImageUploadValidator.ValidatedImage image = ImageUploadValidator.validate(file, "Profile image is required");
     User user = currentUser();
+    String key = "profile-images/" + UUID.randomUUID() + "." + image.extension();
+    StoredObject stored;
+    try (var input = file.getInputStream()) {
+      stored = storage.store(key, image.contentType(), file.getSize(), input);
+    }
+    storageCleanup.replaceAfterTransaction(user.getProfileImageUrl(), key, "profile-images/");
     user.setProfileImageUrl(stored.url());
     return response(users.save(user));
   }

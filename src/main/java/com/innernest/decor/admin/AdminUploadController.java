@@ -1,14 +1,17 @@
 package com.innernest.decor.admin;
 
 import com.innernest.decor.common.BusinessRuleException;
+import com.innernest.decor.storage.ImageUploadValidator;
+import com.innernest.decor.storage.StorageService;
+import com.innernest.decor.storage.StoredObject;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.util.Set;
 import java.util.UUID;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
@@ -17,25 +20,30 @@ import org.springframework.web.multipart.MultipartFile;
 @RestController
 @RequestMapping("/api/admin/uploads")
 public class AdminUploadController {
-  private static final Path PRODUCT_IMAGE_DIR = Path.of("uploads", "product-images");
-  private static final Set<String> EXTENSIONS = Set.of("jpg", "jpeg", "png", "webp", "gif");
+  private static final String PRODUCT_IMAGE_PREFIX = "product-images/";
+  private final StorageService storage;
+
+  AdminUploadController(StorageService storage) {
+    this.storage = storage;
+  }
 
   @PostMapping(value = "/product-images", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
   UploadedImageResponse productImage(@RequestPart("file") MultipartFile file) throws IOException {
-    if (file.isEmpty()) throw new BusinessRuleException("Image file is required");
-    String original = file.getOriginalFilename() == null ? "" : file.getOriginalFilename();
-    String extension = extension(original);
-    if (!EXTENSIONS.contains(extension)) throw new BusinessRuleException("Only JPG, PNG, WEBP or GIF images are allowed");
-    String contentType = file.getContentType();
-    if (contentType == null || !contentType.startsWith("image/")) throw new BusinessRuleException("Uploaded file must be an image");
-    Files.createDirectories(PRODUCT_IMAGE_DIR);
-    String filename = UUID.randomUUID() + "." + extension;
-    Files.copy(file.getInputStream(), PRODUCT_IMAGE_DIR.resolve(filename), StandardCopyOption.REPLACE_EXISTING);
-    return new UploadedImageResponse(filename, "http://localhost:8080/uploads/product-images/" + filename);
+    ImageUploadValidator.ValidatedImage image = ImageUploadValidator.validate(file, "Image file is required");
+    String filename = UUID.randomUUID() + "." + image.extension();
+    StoredObject stored;
+    try (var input = file.getInputStream()) {
+      stored = storage.store(PRODUCT_IMAGE_PREFIX + filename, image.contentType(), file.getSize(), input);
+    }
+    return new UploadedImageResponse(filename, stored.url());
   }
 
-  private String extension(String filename) {
-    int index = filename.lastIndexOf('.');
-    return index < 0 ? "" : filename.substring(index + 1).toLowerCase();
+  @DeleteMapping("/product-images/{filename:.+}")
+  @ResponseStatus(HttpStatus.NO_CONTENT)
+  void deleteProductImage(@PathVariable String filename) {
+    if (!filename.matches("[0-9a-fA-F-]{36}\\.(jpg|jpeg|png|webp|gif)")) {
+      throw new BusinessRuleException("Invalid product image filename");
+    }
+    storage.delete(PRODUCT_IMAGE_PREFIX + filename);
   }
 }

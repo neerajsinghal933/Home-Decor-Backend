@@ -19,6 +19,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
 
 @Entity
 @Table(name = "orders")
@@ -62,13 +63,21 @@ public class Order {
   private BigDecimal discountAmount = BigDecimal.ZERO;
   private BigDecimal total;
   private String promoCode;
+  private String paymentProvider;
   private String razorpayOrderId;
   private String razorpayPaymentId;
   private String razorpaySignature;
 
+  @Column(name = "paid_at")
+  private Instant paidAt;
+
   @CreationTimestamp
   @Column(name = "created_at", updatable = false)
   private Instant createdAt;
+
+  @UpdateTimestamp
+  @Column(name = "updated_at", nullable = false)
+  private Instant updatedAt;
 
   @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
   private List<OrderItem> items = new ArrayList<>();
@@ -116,14 +125,19 @@ public class Order {
   public void setDiscountAmount(BigDecimal discountAmount) { this.discountAmount = discountAmount; }
   public String getPromoCode() { return promoCode; }
   public void setPromoCode(String promoCode) { this.promoCode = promoCode; }
+  public String getPaymentProvider() { return paymentProvider; }
+  public void setPaymentProvider(String paymentProvider) { this.paymentProvider = paymentProvider; }
   public String getRazorpayOrderId() { return razorpayOrderId; }
   public void setRazorpayOrderId(String razorpayOrderId) { this.razorpayOrderId = razorpayOrderId; }
   public String getRazorpayPaymentId() { return razorpayPaymentId; }
   public void setRazorpayPaymentId(String razorpayPaymentId) { this.razorpayPaymentId = razorpayPaymentId; }
   public String getRazorpaySignature() { return razorpaySignature; }
   public void setRazorpaySignature(String razorpaySignature) { this.razorpaySignature = razorpaySignature; }
+  public Instant getPaidAt() { return paidAt; }
+  public void setPaidAt(Instant paidAt) { this.paidAt = paidAt; }
   public BigDecimal getTotal() { return total; }
   public void setTotal(BigDecimal total) { this.total = total; }
   public Instant getCreatedAt() { return createdAt; }
+  public Instant getUpdatedAt() { return updatedAt; }
   public List<OrderItem> getItems() { return items; }
 }

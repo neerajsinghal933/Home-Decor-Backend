@@ -60,7 +60,7 @@ public class Product {
   private int reviewCount;
 
   @Column(nullable = false)
-  private BigDecimal rating = BigDecimal.valueOf(4.8);
+  private BigDecimal rating = BigDecimal.ZERO;
 
   @Enumerated(EnumType.STRING)
   @Column(nullable = false)
@@ -76,6 +76,9 @@ public class Product {
 
   @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true)
   private List<ProductImage> images = new ArrayList<>();
+
+  @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true)
+  private List<ProductSizeVariant> sizeVariants = new ArrayList<>();
 
   @ManyToMany
   @JoinTable(name = "product_tags", joinColumns = @JoinColumn(name = "product_id"), inverseJoinColumns = @JoinColumn(name = "tag_id"))
@@ -118,7 +121,7 @@ public class Product {
   public int getReviewCount() { return reviewCount; }
   public void setReviewCount(int reviewCount) { this.reviewCount = reviewCount; }
   public BigDecimal getRating() { return rating; }
-  public void setRating(BigDecimal rating) { this.rating = rating == null ? BigDecimal.valueOf(4.8) : rating; }
+  public void setRating(BigDecimal rating) { this.rating = rating == null ? BigDecimal.ZERO : rating; }
   public ProductStatus getStatus() { return status; }
   public void setStatus(ProductStatus status) { this.status = status; }
   public boolean isFeatured() { return featured; }
@@ -128,12 +131,52 @@ public class Product {
   public String getPrimaryImage() { return primaryImage; }
   public void setPrimaryImage(String primaryImage) { this.primaryImage = primaryImage; }
   public List<ProductImage> getImages() { return images; }
+  public List<ProductSizeVariant> getSizeVariants() { return sizeVariants; }
   public java.util.Set<Tag> getTags() { return tags; }
   public void setTags(java.util.Collection<Tag> values) { tags.clear(); tags.addAll(values); }
   public Instant getCreatedAt() { return createdAt; }
   public Instant getUpdatedAt() { return updatedAt; }
   public List<ProductImage> getImagesInDisplayOrder() {
     return images.stream().sorted(Comparator.comparingInt(ProductImage::getDisplayOrder).thenComparing(ProductImage::getId)).toList();
+  }
+  public List<ProductSizeVariant> getSizeVariantsInDisplayOrder() {
+    return sizeVariants.stream()
+        .sorted(Comparator.comparingInt(ProductSizeVariant::getDisplayOrder).thenComparing(ProductSizeVariant::getId))
+        .toList();
+  }
+  public java.util.Optional<ProductSizeVariant> findSizeVariant(String size) {
+    if (size == null || size.isBlank()) return java.util.Optional.empty();
+    String normalized = size.trim();
+    return sizeVariants.stream().filter(variant -> variant.getSizeLabel().equalsIgnoreCase(normalized)).findFirst();
+  }
+  public BigDecimal priceForSize(String size) {
+    if (sizeVariants.isEmpty()) return price;
+    if (size == null || size.isBlank()) return getSizeVariantsInDisplayOrder().get(0).getPrice();
+    return findSizeVariant(size)
+        .orElseThrow(() -> new IllegalArgumentException("Unknown size variant"))
+        .getPrice();
+  }
+  public boolean hasSizeVariants() { return !sizeVariants.isEmpty(); }
+  public String defaultSize() {
+    return sizeVariants.isEmpty() ? null : getSizeVariantsInDisplayOrder().get(0).getSizeLabel();
+  }
+  public void replaceSizeVariants(List<ProductSizeVariantInput> rows) {
+    List<ProductSizeVariant> existing = new ArrayList<>(sizeVariants);
+    List<ProductSizeVariant> replacements = new ArrayList<>();
+    for (int i = 0; i < rows.size(); i++) {
+      ProductSizeVariantInput row = rows.get(i);
+      ProductSizeVariant variant = existing.stream()
+          .filter(candidate -> candidate.getSizeLabel().equalsIgnoreCase(row.size().trim()))
+          .findFirst()
+          .orElseGet(ProductSizeVariant::new);
+      variant.setProduct(this);
+      variant.setSizeLabel(row.size().trim());
+      variant.setPrice(row.price());
+      variant.setDisplayOrder(i);
+      replacements.add(variant);
+    }
+    sizeVariants.clear();
+    sizeVariants.addAll(replacements);
   }
   public void replaceImages(List<ProductImageInput> rows) {
     images.clear();

@@ -28,14 +28,18 @@ public class SecurityConfig {
         .cors(cors -> {})
         .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
         .authorizeHttpRequests(auth -> auth
-            .requestMatchers(HttpMethod.GET, "/api/categories", "/api/tags", "/api/products/**", "/api/health", "/uploads/product-images/**", "/uploads/profile-images/**").permitAll()
+            .requestMatchers(HttpMethod.GET, "/api/categories", "/api/tags", "/api/products/**", "/api/health", "/uploads/product-images/**", "/uploads/profile-images/**", "/uploads/review-images/**").permitAll()
             .requestMatchers(HttpMethod.GET, "/actuator/health", "/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
-            .requestMatchers(HttpMethod.POST, "/api/auth/google", "/api/newsletter", "/api/contact", "/api/promos/validate").permitAll()
+            .requestMatchers(HttpMethod.POST, "/api/auth/google", "/api/promos/validate").permitAll()
+            .requestMatchers(HttpMethod.POST, "/api/newsletter", "/api/contact").authenticated()
             .requestMatchers("/api/wishlist/**").authenticated()
             .requestMatchers("/api/profile/**").authenticated()
             .requestMatchers("/api/admin/**").hasRole("ADMIN")
             .requestMatchers(HttpMethod.GET, "/api/orders/my").authenticated()
-            .requestMatchers("/api/cart/**", "/api/orders/**", "/api/payments/**").permitAll()
+            .requestMatchers("/api/orders/my/**").authenticated()
+            .requestMatchers(HttpMethod.POST, "/api/payments/razorpay/webhook").permitAll()
+            .requestMatchers("/api/payments/**").authenticated()
+            .requestMatchers("/api/cart/**", "/api/orders/**").permitAll()
             .anyRequest().authenticated())
         .exceptionHandling(ex -> ex
             .authenticationEntryPoint((request, response, authException) -> {

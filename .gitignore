@@ -1,2 +1,15 @@
-*.yml
-/target
+target/
+
+# Local environment files may contain credentials.
+.env
+.env.*
+!.env.example
+
+# Optional Spring override files reserved for uncommitted secrets.
+application-secrets.yml
+application-*-secrets.yml
+application-secrets.properties
+application-*-secrets.properties
+
+.DS_Store
+/uploads

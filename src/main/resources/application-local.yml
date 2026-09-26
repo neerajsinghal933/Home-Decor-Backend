@@ -1,0 +1,21 @@
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/home_decor?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:root1234}
+  jpa:
+    properties:
+      hibernate:
+        format_sql: false
+
+app:
+  storage:
+    local-path: ${APP_LOCAL_STORAGE_PATH:uploads}
+    public-base-url: ${APP_PUBLIC_BASE_URL:http://localhost:8080}
+  jwt:
+    secret: ${JWT_SECRET:mQey4eqgqrU3ZrvzzQa0Y/BJz4baVFqZqhXqzyYZ7MI=}
+
+  google:
+    client-id: ${APP_GOOGLE_CLIENT_ID:46507635006-71lc9j21c1g9l5sqbg6tg345jgp9kght.apps.googleusercontent.com,619256713819-n3vt44akvrtqms3bg92gif4t9mptpm5e.apps.googleusercontent.com}
+  admin:
+    emails: ${APP_ADMIN_EMAILS:}

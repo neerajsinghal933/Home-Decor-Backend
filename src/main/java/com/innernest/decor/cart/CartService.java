@@ -42,7 +42,7 @@ public class CartService {
     if (product.getStock() < qty) throw new BusinessRuleException("Insufficient stock for " + product.getName());
 
     Cart cart = loadOrCreate(sessionId);
-    String size = StringUtils.hasText(request.size()) ? request.size() : "Medium";
+    String size = selectedSize(product, request.size());
     String color = StringUtils.hasText(request.color()) ? request.color() : product.getColor();
     CartItem item = cart.getItems().stream()
         .filter(entry -> Objects.equals(entry.getProduct().getId(), product.getId())
@@ -110,6 +110,11 @@ public class CartService {
         .orElseThrow(() -> new DuplicateResourceException("Cart is empty or has already been checked out"));
   }
 
+  @Transactional
+  public void clearForUser(Long userId) {
+    carts.findByUserIdForCheckout(userId).ifPresent(cart -> cart.getItems().clear());
+  }
+
   private java.util.Optional<Cart> loadExisting(String sessionId) {
     var principal = SecuritySupport.currentUser();
     if (principal.isPresent()) {
@@ -132,11 +137,27 @@ public class CartService {
   public CartResponse toResponse(Cart cart) {
     var items = cart.getItems().stream().map(CartItemResponse::from).toList();
     BigDecimal subtotal = cart.getItems().stream()
-        .map(item -> item.getProduct().getPrice().multiply(BigDecimal.valueOf(item.getQty())))
+        .map(item -> priceFor(item).multiply(BigDecimal.valueOf(item.getQty())))
         .reduce(BigDecimal.ZERO, BigDecimal::add);
     BigDecimal shipping = subtotal.compareTo(MoneyUtils.rupees(1499)) >= 0 || subtotal.signum() == 0 ? BigDecimal.ZERO : MoneyUtils.rupees(149);
     BigDecimal tax = MoneyUtils.tax(subtotal);
     int itemCount = cart.getItems().stream().mapToInt(CartItem::getQty).sum();
     return new CartResponse(items, new CartTotalsResponse(itemCount, subtotal, shipping, tax, subtotal.add(shipping).add(tax)));
+  }
+
+  public BigDecimal priceFor(CartItem item) {
+    Product product = item.getProduct();
+    if (product.hasSizeVariants() && product.findSizeVariant(item.getSize()).isEmpty()) {
+      throw new BusinessRuleException("The selected size is no longer available for " + product.getName());
+    }
+    return product.priceForSize(item.getSize());
+  }
+
+  private String selectedSize(Product product, String requestedSize) {
+    if (!product.hasSizeVariants()) return StringUtils.hasText(requestedSize) ? requestedSize.trim() : "Medium";
+    if (!StringUtils.hasText(requestedSize)) return product.defaultSize();
+    return product.findSizeVariant(requestedSize)
+        .map(variant -> variant.getSizeLabel())
+        .orElseThrow(() -> new BusinessRuleException("Please select an available size for " + product.getName()));
   }
 }
